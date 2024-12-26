@@ -10,7 +10,6 @@ import (
 	"github.com/miekg/dns"
 )
 
-
 // looktypea function to look up A records (IP addresses)
 func looktypea(fqdn, address string) ([]string, error) {
 	var m dns.Msg
@@ -86,12 +85,16 @@ func lokkup(fqdn, address string) []result {
 }
 
 // Worker function for concurrency
-func worker(tracker chan empty, fqdns chan string, gather chan []result, address string) {
+func worker(tracker chan empty, fqdns chan string, gather chan []result, address string, w *tabwriter.Writer) {
 	for fqdn := range fqdns {
 		results := lokkup(fqdn, address)
 
 		if len(results) > 0 {
-			gather <- results
+			// Print the results immediately as they are gathered
+			for _, result := range results {
+				fmt.Fprintf(w, "%s\t%s\n", result.Hostname, result.IPAddress)
+				w.Flush() // Flush to immediately show the result
+			}
 		}
 	}
 
@@ -107,7 +110,7 @@ type result struct {
 }
 
 func main() {
-	// Usage to be passed when running te program 
+	// Usage to be passed when running the program
 	var (
 		flDomain     = flag.String("domain", "", "The domain to perform guessing against.")
 		flWordlist   = flag.String("wordlist", "", "The wordlist to use for guessing.")
@@ -121,7 +124,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	var results []result
 	fqdns := make(chan string, *flWorkerCount)
 	gather := make(chan []result)
 	tracker := make(chan empty)
@@ -133,18 +135,28 @@ func main() {
 	defer fh.Close()
 
 	scanner := bufio.NewScanner(fh)
+
+	// Create tabwriter for formatted output
+	w := tabwriter.NewWriter(os.Stdout, 0, 8, ' ', 0, 0)
+
+	// Start workers
 	for i := 0; i < *flWorkerCount; i++ {
-		go worker(tracker, fqdns, gather, *flServerAddr)
+		go worker(tracker, fqdns, gather, *flServerAddr, w)
 	}
 
 	go func() {
 		for r := range gather {
-			results = append(results, r...)
+			// We accumulate results, but print them as soon as they arrive
+			for _, r := range r {
+				fmt.Fprintf(w, "%s\t%s\n", r.Hostname, r.IPAddress)
+				w.Flush() // Immediately flush after printing
+			}
+			var e empty
+			tracker <- e
 		}
-		var e empty
-		tracker <- e
 	}()
 
+	// Send domain names to workers
 	for scanner.Scan() {
 		fqdns <- fmt.Sprintf("%s.%s", scanner.Text(), *flDomain)
 	}
@@ -156,17 +168,10 @@ func main() {
 
 	close(fqdns)
 
+	// Wait for all workers to finish
 	for i := 0; i < *flWorkerCount; i++ {
 		<-tracker
 	}
 	close(gather)
 	<-tracker
-
-	// Print results in a formatted table
-	w := tabwriter.NewWriter(os.Stdout, 0, 8, ' ', 0, 0)
-
-	for _, r := range results {
-		fmt.Fprintf(w, "%s\t%s\n", r.Hostname, r.IPAddress)
-	}
-	w.Flush()
 }
