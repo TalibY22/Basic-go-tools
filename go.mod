@@ -3,6 +3,7 @@ module blackhat
 go 1.22.7
 
 require (
+	github.com/google/gopacket v1.1.19 // indirect
 	github.com/miekg/dns v1.1.62 // indirect
 	golang.org/x/mod v0.18.0 // indirect
 	golang.org/x/net v0.27.0 // indirect
